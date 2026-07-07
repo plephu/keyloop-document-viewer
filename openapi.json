@@ -1,0 +1,430 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Unified Document Viewer API",
+    "description": "Aggregates vehicle documents from two mocked dealership systems (Sales System API and Service System API) into a single view. Keyloop Technical Assessment - Scenario D.",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/v1/vehicles/{vin}/documents": {
+      "get": {
+        "tags": [
+          "Unified Document Viewer"
+        ],
+        "summary": "Get Vehicle Documents",
+        "description": "Unified search: aggregate documents for a VIN from both external\nsystems. Tolerates partial failure \u2014 if one source is down, documents\nfrom the healthy source are still returned, with per-source status.",
+        "operationId": "get_vehicle_documents_api_v1_vehicles__vin__documents_get",
+        "parameters": [
+          {
+            "name": "vin",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Vin"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AggregatedDocumentsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/search-history": {
+      "get": {
+        "tags": [
+          "Unified Document Viewer"
+        ],
+        "summary": "Get Search History",
+        "description": "Recent VIN searches (audit trail / observability).",
+        "operationId": "get_search_history_api_v1_search_history_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SearchLogEntry"
+                  },
+                  "title": "Response Get Search History Api V1 Search History Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/health": {
+      "get": {
+        "tags": [
+          "Unified Document Viewer"
+        ],
+        "summary": "Health",
+        "operationId": "health_api_v1_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mock/sales-system/documents/{vin}": {
+      "get": {
+        "tags": [
+          "Mock: Sales System API"
+        ],
+        "summary": "Get Sales Documents",
+        "operationId": "get_sales_documents_mock_sales_system_documents__vin__get",
+        "parameters": [
+          {
+            "name": "vin",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Vin"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mock/service-system/records/{vin}/files": {
+      "get": {
+        "tags": [
+          "Mock: Service System API"
+        ],
+        "summary": "Get Service Documents",
+        "operationId": "get_service_documents_mock_service_system_records__vin__files_get",
+        "parameters": [
+          {
+            "name": "vin",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Vin"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AggregatedDocumentsResponse": {
+        "properties": {
+          "vin": {
+            "type": "string",
+            "title": "Vin"
+          },
+          "retrieved_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Retrieved At"
+          },
+          "from_cache": {
+            "type": "boolean",
+            "title": "From Cache",
+            "default": false
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceResult"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/Document"
+            },
+            "type": "array",
+            "title": "Documents",
+            "description": "Consolidated list from all sources, newest first."
+          }
+        },
+        "type": "object",
+        "required": [
+          "vin",
+          "retrieved_at",
+          "sources",
+          "documents"
+        ],
+        "title": "AggregatedDocumentsResponse"
+      },
+      "Document": {
+        "properties": {
+          "external_id": {
+            "type": "string",
+            "title": "External Id"
+          },
+          "source_system": {
+            "$ref": "#/components/schemas/SourceSystem"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "doc_type": {
+            "type": "string",
+            "title": "Doc Type"
+          },
+          "created_date": {
+            "type": "string",
+            "title": "Created Date"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "external_id",
+          "source_system",
+          "title",
+          "doc_type",
+          "created_date",
+          "url"
+        ],
+        "title": "Document",
+        "description": "A single document, normalised from either external system."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "SearchLogEntry": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "vin": {
+            "type": "string",
+            "title": "Vin"
+          },
+          "searched_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Searched At"
+          },
+          "sales_status": {
+            "type": "string",
+            "title": "Sales Status"
+          },
+          "service_status": {
+            "type": "string",
+            "title": "Service Status"
+          },
+          "document_count": {
+            "type": "integer",
+            "title": "Document Count"
+          },
+          "duration_ms": {
+            "type": "number",
+            "title": "Duration Ms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "vin",
+          "searched_at",
+          "sales_status",
+          "service_status",
+          "document_count",
+          "duration_ms"
+        ],
+        "title": "SearchLogEntry"
+      },
+      "SourceResult": {
+        "properties": {
+          "source": {
+            "$ref": "#/components/schemas/SourceSystem"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SourceStatus"
+          },
+          "document_count": {
+            "type": "integer",
+            "title": "Document Count",
+            "default": 0
+          },
+          "error_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "status"
+        ],
+        "title": "SourceResult",
+        "description": "Per-source outcome so the client can show partial-failure state."
+      },
+      "SourceStatus": {
+        "type": "string",
+        "enum": [
+          "ok",
+          "error",
+          "timeout"
+        ],
+        "title": "SourceStatus"
+      },
+      "SourceSystem": {
+        "type": "string",
+        "enum": [
+          "sales_system",
+          "service_system"
+        ],
+        "title": "SourceSystem"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}
