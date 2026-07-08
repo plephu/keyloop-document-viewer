@@ -16,13 +16,21 @@ source being slow or down.
 Requires Python 3.11+.
 
 ```bash
-python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
+python -m venv venv && source venv/bin/activate   
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
+
+# Windows Powershell:
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python -m uvicorn app.main:app --reload --port 8000
 ```
 
-- Interactive API docs (OpenAPI): http://localhost:8000/docs
-- Health check: http://localhost:8000/api/v1/health
+- Interactive API docs (OpenAPI): [http://localhost:8000/docs](http://localhost:8000/docs)
+- Health check: [http://localhost:8000/api/v1/health](http://localhost:8000/api/v1/health)
+
+
 
 ## Run the Tests
 
@@ -59,15 +67,21 @@ curl -s http://localhost:8000/api/v1/vehicles/TOOSHORT/documents
 curl -s "http://localhost:8000/api/v1/search-history?limit=10" | python -m json.tool
 ```
 
+
+
 ### Demo VIN cheat-sheet
 
-| VIN | Behaviour |
-|---|---|
-| `1HGBH41JXMN109186` | 3 sales + 2 service documents |
-| `5YJSA1E26MF123456` | 1 sales + 2 service documents |
-| any valid VIN ending in `E` | Sales system returns 500 → partial results |
-| any valid VIN ending in `F` | Service system returns 503 → partial results |
+
+| VIN                         | Behaviour                                            |
+| --------------------------- | ---------------------------------------------------- |
+| `1HGBH41JXMN109186`         | 3 sales + 2 service documents                        |
+| `5YJSA1E26MF123456`         | 1 sales + 2 service documents                        |
+| any valid VIN ending in `E` | Sales system returns 500 → partial results           |
+| any valid VIN ending in `F` | Service system returns 503 → partial results         |
 | any valid VIN ending in `T` | Both sources hang → timeout path (502 / stale cache) |
+
+
+
 
 ## Project Layout
 
@@ -88,7 +102,11 @@ tests/
 
 ---
 
+
+
 ## AI Collaboration Narrative
+
+
 
 ### Strategy for directing the AI
 
@@ -96,23 +114,25 @@ I treated the AI (Claude) as a senior pair-programmer that I direct, verify, and
 overrule — not as an autocomplete. My process had four phases:
 
 1. **Scenario selection.** Before writing any code, I had the AI analyse all
-   four scenarios against the published evaluation rubric and argue a
+  four scenarios against the published evaluation rubric and argue a
    points-per-effort recommendation. It surfaced that Scenario D has the
    clearest architectural story (parallel fan-out, partial failure, per-source
    timeouts) at a manageable implementation size. I made the final call.
 2. **Design before code.** I asked for design options on the ambiguous parts —
-   most importantly *what "persistent database" means in a read-aggregation
+  most importantly *what "persistent database" means in a read-aggregation
    scenario*. The AI proposed three options (full document mirror, cache,
    audit log). I rejected the full mirror (data-ownership anti-pattern:
    the external systems are the source of truth) and chose audit log + stale
    cache, which also gave a graceful-degradation story.
 3. **Constrained implementation.** I directed the AI to keep the aggregator
-   **framework-agnostic** (plain async functions, injected HTTP client) so the
+  **framework-agnostic** (plain async functions, injected HTTP client) so the
    core business logic is unit-testable without FastAPI, and required that the
    two mock systems use *different* payload shapes to force real normalisation.
 4. **Tests as the verification contract.** I required a failure-mode matrix
-   (one source down / both down / slow source / malformed JSON / bad VIN)
+  (one source down / both down / slow source / malformed JSON / bad VIN)
    up front, and turned it into the test plan before accepting implementation.
+
+
 
 ### Verifying and refining the AI's output
 
@@ -120,26 +140,29 @@ The test suite caught two real defects in AI-generated code, which is exactly
 why I insisted on it:
 
 - **Timeouts silently not enforced.** The first implementation relied on
-  `httpx`'s request timeout. The "slow source" unit test failed — because
-  mock/ASGI transports don't honour httpx timeouts, and the same would have
-  bitten any in-process test setup. Fix: enforce the deadline with
-  `asyncio.wait_for(...)` at the application layer, which is transport-independent.
-  The test also asserts *total* duration ≈ one timeout, proving requests
-  genuinely run in parallel.
+`httpx`'s request timeout. The "slow source" unit test failed — because
+mock/ASGI transports don't honour httpx timeouts, and the same would have
+bitten any in-process test setup. Fix: enforce the deadline with
+`asyncio.wait_for(...)` at the application layer, which is transport-independent.
+The test also asserts *total* duration ≈ one timeout, proving requests
+genuinely run in parallel.
 - **Self-calls failing under the test client.** Integration tests failed
-  because the app tried to reach its own mock routes over a real socket that
-  `TestClient` never opens. Fix: route the "external" calls through
-  `httpx.ASGITransport`, keeping full HTTP semantics while working identically
-  under uvicorn and under tests. (In production this becomes real base URLs —
-  a config change, not a code change.)
+because the app tried to reach its own mock routes over a real socket that
+`TestClient` never opens. Fix: route the "external" calls through
+`httpx.ASGITransport`, keeping full HTTP semantics while working identically
+under uvicorn and under tests. (In production this becomes real base URLs —
+a config change, not a code change.)
 - Smaller catches from review: test VINs that were 16 characters long (my own
-  validator correctly rejected them — a nice mutual check between validation
-  code and tests), and timezone-aware timestamps for the audit log.
+validator correctly rejected them — a nice mutual check between validation
+code and tests), and timezone-aware timestamps for the audit log.
+
+
 
 ### Ensuring final quality
 
 - All 17 tests green; ran the real server and exercised every documented cURL
-  example, including both failure modes, and verified the structured logs and
-  `X-Request-ID` correlation.
+example, including both failure modes, and verified the structured logs and
+`X-Request-ID` correlation.
 - Read every line of the final code and can defend each decision — the
-  design-decisions section of SYSTEM_DESIGN.md is that defence in writing.
+design-decisions section of SYSTEM_DESIGN.md is that defence in writing.
+
