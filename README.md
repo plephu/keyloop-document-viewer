@@ -38,9 +38,10 @@ python -m uvicorn app.main:app --reload --port 8000
 python -m pytest tests/ -v
 ```
 
-17 tests: unit tests for the core aggregation logic (normalisation, parallel
+26 tests: unit tests for the core aggregation logic (normalisation, parallel
 fetch, partial failure, timeout, malformed payloads) + full-stack integration
-tests (VIN validation, consolidation, source labelling, audit persistence).
+tests (VIN validation, consolidation, source labelling, stale-cache fallback,
+cache refresh, audit persistence).
 
 ## Try It (cURL examples — the mocked client layer)
 
@@ -160,7 +161,7 @@ code and tests), and timezone-aware timestamps for the audit log.
 
 ### Ensuring final quality
 
-- All 17 tests green; ran the real server and exercised every documented cURL
+- All 26 tests green; ran the real server and exercised every documented cURL
 example, including both failure modes, and verified the structured logs and
 `X-Request-ID` correlation.
 - Read every line of the final code and can defend each decision — the
