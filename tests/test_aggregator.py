@@ -163,3 +163,106 @@ async def test_malformed_json_from_source_is_treated_as_error():
     sources, docs, _ = await aggregate_documents(VIN, BASE, client)
     assert sources[0].status == SourceStatus.ERROR
     assert len(docs) == 1
+
+
+# --- Malformed / edge-case payloads ------------------------------------------
+
+def test_normalise_sales_raises_on_document_missing_required_field():
+    bad = {
+        "documents": [
+            {  # no "docId"
+                "docName": "Orphan",
+                "category": "CONTRACT",
+                "dateCreated": "2024-01-01",
+                "downloadLink": "https://x/o.pdf",
+            }
+        ]
+    }
+    with pytest.raises(KeyError):
+        normalise_sales(bad)
+
+
+@pytest.mark.asyncio
+async def test_source_with_one_bad_document_is_all_or_nothing():
+    """Pin current behaviour: a single malformed document poisons its whole
+    source (marked ERROR, all its docs dropped), but the other source's
+    documents still come through."""
+    mixed = {
+        "vehicleVin": VIN,
+        "documents": [
+            SALES_PAYLOAD["documents"][0],  # valid
+            {"docName": "missing docId"},   # malformed
+        ],
+    }
+    client = make_client(
+        httpx.Response(200, json=mixed),
+        httpx.Response(200, json=SERVICE_PAYLOAD),
+    )
+    sources, docs, _ = await aggregate_documents(VIN, BASE, client)
+    assert sources[0].status == SourceStatus.ERROR
+    assert sources[1].status == SourceStatus.OK
+    assert [d.source_system for d in docs] == [SourceSystem.SERVICE]
+
+
+@pytest.mark.asyncio
+async def test_null_json_body_is_treated_as_error():
+    client = make_client(
+        httpx.Response(200, content=b"null",
+                       headers={"content-type": "application/json"}),
+        httpx.Response(200, json=SERVICE_PAYLOAD),
+    )
+    sources, docs, _ = await aggregate_documents(VIN, BASE, client)
+    assert sources[0].status == SourceStatus.ERROR
+    assert len(docs) == 1
+
+
+def test_normalise_service_keeps_short_created_string_as_is():
+    payload = {
+        "files": [
+            {
+                "id": 1,
+                "title": "t",
+                "type": "invoice",
+                "created": "2025-06",  # shorter than a full date
+                "file_url": "https://x/1.pdf",
+            }
+        ]
+    }
+    assert normalise_service(payload)[0].created_date == "2025-06"
+
+
+@pytest.mark.asyncio
+async def test_equal_created_dates_keeps_all_documents_in_stable_order():
+    same_day = "2025-06-02"
+    sales = {
+        "vehicleVin": VIN,
+        "documents": [
+            {
+                "docId": "S-1",
+                "docName": "Contract",
+                "category": "CONTRACT",
+                "dateCreated": same_day,
+                "downloadLink": "https://x/s1.pdf",
+            }
+        ],
+    }
+    service = {
+        "vin": VIN,
+        "files": [
+            {
+                "id": 9001,
+                "title": "Invoice",
+                "type": "invoice",
+                "created": f"{same_day}T09:30:00Z",
+                "file_url": "https://x/9001.pdf",
+            }
+        ],
+    }
+    client = make_client(
+        httpx.Response(200, json=sales),
+        httpx.Response(200, json=service),
+    )
+    _, docs, _ = await aggregate_documents(VIN, BASE, client)
+    assert len(docs) == 2
+    # sorted() is stable: on a date tie, concatenation order (sales first) holds.
+    assert [d.source_system for d in docs] == [SourceSystem.SALES, SourceSystem.SERVICE]

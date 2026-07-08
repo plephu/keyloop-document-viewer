@@ -14,6 +14,8 @@ os.environ["DATABASE_URL"] = f"sqlite:///{_db_path}"
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.main import app  # noqa: E402
+from app.routers import documents as documents_router  # noqa: E402
+from app.schemas import SourceResult, SourceStatus, SourceSystem  # noqa: E402
 
 KNOWN_VIN = "1HGBH41JXMN109186"     # documents in both systems
 EMPTY_VIN = "WBA3A5C58DF123456"     # valid VIN, no documents anywhere
@@ -93,6 +95,88 @@ def test_both_sources_timing_out_returns_502_when_no_cache(client):
     detail = r.json()["detail"]
     assert detail["message"] == "Both external systems are unavailable"
     assert all(s["status"] == "timeout" for s in detail["sources"])
+
+
+def _force_all_sources_down(monkeypatch):
+    """Replace the aggregator so both sources report failure — the mocks
+    can't fail for a VIN that already has cached documents (failure is
+    keyed on the VIN suffix), so we patch at the router boundary."""
+
+    async def all_failed(vin, base_url, client=None):
+        return (
+            [
+                SourceResult(source=SourceSystem.SALES,
+                             status=SourceStatus.ERROR, error_detail="down"),
+                SourceResult(source=SourceSystem.SERVICE,
+                             status=SourceStatus.TIMEOUT, error_detail="down"),
+            ],
+            [],
+            12.3,
+        )
+
+    monkeypatch.setattr(documents_router, "aggregate_documents", all_failed)
+
+
+def test_both_sources_down_serves_stale_cache(client, monkeypatch):
+    # 1. Successful search populates the cache.
+    r = client.get(f"/api/v1/vehicles/{KNOWN_VIN}/documents")
+    assert r.status_code == 200
+    live_docs = r.json()["documents"]
+
+    # 2. Both sources go down -> stale cache is served instead of a 502.
+    _force_all_sources_down(monkeypatch)
+    r = client.get(f"/api/v1/vehicles/{KNOWN_VIN}/documents")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["from_cache"] is True
+    assert {s["status"] for s in body["sources"]} == {"error", "timeout"}
+    assert len(body["documents"]) == len(live_docs) == 5
+    assert (
+        {d["external_id"] for d in body["documents"]}
+        == {d["external_id"] for d in live_docs}
+    )
+
+
+def test_repeated_search_refreshes_cache_without_duplicates(client, monkeypatch):
+    # Two successful searches for the same VIN must replace, not append.
+    client.get(f"/api/v1/vehicles/{KNOWN_VIN}/documents")
+    r = client.get(f"/api/v1/vehicles/{KNOWN_VIN}/documents")
+    assert r.status_code == 200
+    assert r.json()["from_cache"] is False
+    assert len(r.json()["documents"]) == 5
+
+    # The cache (read via the stale-cache path) must also hold exactly 5.
+    _force_all_sources_down(monkeypatch)
+    r = client.get(f"/api/v1/vehicles/{KNOWN_VIN}/documents")
+    assert r.json()["from_cache"] is True
+    assert len(r.json()["documents"]) == 5
+
+
+def test_failed_search_is_logged_in_history(client):
+    r = client.get(f"/api/v1/vehicles/{TIMEOUT_VIN}/documents")
+    assert r.status_code == 502
+
+    entries = client.get("/api/v1/search-history?limit=100").json()
+    entry = next(e for e in entries if e["vin"] == TIMEOUT_VIN)
+    assert entry["sales_status"] == "timeout"
+    assert entry["service_status"] == "timeout"
+    assert entry["document_count"] == 0
+
+
+def test_search_history_limit_is_clamped(client):
+    # Make sure at least two history entries exist.
+    client.get(f"/api/v1/vehicles/{KNOWN_VIN}/documents")
+    client.get(f"/api/v1/vehicles/{EMPTY_VIN}/documents")
+
+    # limit below 1 is clamped up to 1
+    assert len(client.get("/api/v1/search-history?limit=0").json()) == 1
+    assert len(client.get("/api/v1/search-history?limit=-5").json()) == 1
+    # limit above 100 is clamped down to 100
+    r = client.get("/api/v1/search-history?limit=1000")
+    assert r.status_code == 200
+    assert len(r.json()) <= 100
+    # non-numeric limit is rejected by validation
+    assert client.get("/api/v1/search-history?limit=abc").status_code == 422
 
 
 def test_search_history_is_persisted(client):
